@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Create Account</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body style="text-align: center;">
+  <h2>Create a New Account</h2>
+  
+  <input type="text" id="newEmail" placeholder="Email" /><br>
+  <input type="password" id="newPassword" placeholder="Password" /><br>
+  <button onclick="register()">Register</button>
+  
+  <p id="register-msg"></p>
+  <p><a href="index.html">Back to Login</a></p>
+
+  <script>
+    async function register() {
+      const email = document.getElementById("newEmail").value.trim();
+      const password = document.getElementById("newPassword").value.trim();
+
+      if (!email || !password) {
+        document.getElementById("register-msg").textContent = "Please fill in all fields.";
+        return;
+      }
+
+      const res = await fetch("/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await res.json();
+      document.getElementById("register-msg").textContent = data.message;
+
+      if (res.ok) {
+        setTimeout(() => {
+          window.location.href = "index.html";
+        }, 1000);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -13,7 +13,7 @@
     <button onclick="login()">Login</button>
     <p id="login-msg"></p>
 
-    <p> <a href="">  Create an account </a> </p>
+<p><a href="register.html">Create an account</a></p>
   </div>
 
   <div id="mail-screen" class="hidden">
@@ -34,6 +34,8 @@
       <input type="text" id="to" placeholder="To" />
       <input type="text" id="subject" placeholder="Subject" />
       <textarea id="body" placeholder="Write your message..."></textarea> <br>
+      <input type="file" id="attachment" /> <br>
+
       <button onclick="sendMail()">Send</button>
       <p id="send-msg"></p>
     </div>

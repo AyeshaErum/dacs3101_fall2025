@@ -81,24 +81,43 @@ async function loadInbox() {
     return;
   }
 
-  mails.forEach(mail => {
-    const div = document.createElement("div");
-    div.innerHTML = `<b>From:</b> ${mail.from}<br>
-                     <b>Subject:</b> ${mail.subject}<br>
-                     <p>${mail.body}</p>`;
-    inboxDiv.appendChild(div);
-  });
+ mails.forEach(mail => {
+  const div = document.createElement("div");
+  div.classList.add("mail-item");
+  div.innerHTML = `
+    <b>From:</b> ${mail.from} <br>
+    <b>Subject:</b> ${mail.subject} <br>
+    <small>${new Date(mail.date).toLocaleString()}</small>
+    <p>${mail.body}</p>
+    ${mail.attachment ? `<a href="/uploads/${mail.attachment}" target="_blank">Download Attachment</a>` : ''}
+    <hr>
+  `;
+  inboxDiv.appendChild(div);
+});
+
+
+
 }
 
 async function sendMail() {
   const to = document.getElementById("to").value;
   const subject = document.getElementById("subject").value;
   const body = document.getElementById("body").value;
+  const fileInput = document.getElementById("attachment");
+  const formData = new FormData();
+
+  formData.append("from", currentUser);
+  formData.append("to", to);
+  formData.append("subject", subject);
+  formData.append("body", body);
+
+  if (fileInput.files.length > 0) {
+    formData.append("attachment", fileInput.files[0]);
+  }
 
   const res = await fetch("/send", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from: currentUser, to, subject, body }),
+    body: formData
   });
 
   if (res.ok) {
@@ -106,6 +125,7 @@ async function sendMail() {
     document.getElementById("to").value = "";
     document.getElementById("subject").value = "";
     document.getElementById("body").value = "";
+    fileInput.value = ""; // clear file input
   } else {
     document.getElementById("send-msg").textContent = "Failed to send.";
   }
