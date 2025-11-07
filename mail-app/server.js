@@ -89,19 +89,27 @@ app.get("/inbox/:email", (req, res) => {
 });
 
 // Send mail route — attach 'from' and 'to'
-app.post("/send", (req, res) => {
-  const { from, to, subject, body } = req.body;
+app.post("/send", upload.single("attachment"), (req, res) => {
+  const from = req.body.from;
+  const to = req.body.to;
+  const subject = req.body.subject;
+  const body = req.body.body;
 
-  // Check that 'to' exists
+  if (!from || !to || !subject || !body)
+    return res.status(400).json({ message: "Missing required fields" });
+
+  // Check recipient exists
   const recipientExists = users.find(u => u.email === to);
-  if (!recipientExists) return res.status(400).json({ message: "Recipient does not exist" });
+  if (!recipientExists)
+    return res.status(400).json({ message: "Recipient does not exist" });
 
   const newMail = {
     from,
     to,
     subject,
     body,
-    date: new Date().toISOString()
+    date: new Date().toISOString(),
+    attachment: req.file ? req.file.filename : null
   };
 
   mails.push(newMail);
@@ -109,6 +117,7 @@ app.post("/send", (req, res) => {
 
   res.json({ message: "Mail sent successfully!" });
 });
+
 
 
 
