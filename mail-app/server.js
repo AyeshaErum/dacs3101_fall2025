@@ -1,8 +1,3 @@
-// server.js
-// import express from "express";
-// import cors from "cors";
-// import bodyParser from "body-parser";
-// import fs from "fs";
 
 let express = require('express')
 let cors = require('cors')
@@ -15,7 +10,8 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static("public"));
 
-let users = [{ email: "user@example.com", password: "1234" }];
+let users = fs.readFileSync('users.json');
+users = JSON.parse(users)
 
 // Load saved mails or start empty
 let mails = [];

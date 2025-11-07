@@ -1,4 +1,18 @@
-let currentUser = null;
+let currentUser = localStorage.getItem("userEmail") || null;
+localStorage.removeItem("userEmail");
+
+window.onload = () => {
+  if (currentUser) {
+    document.getElementById("user-email").textContent = currentUser;
+    document.getElementById("login-screen").classList.add("hidden");
+    document.getElementById("mail-screen").classList.remove("hidden");
+    loadInbox();
+  } else {
+    document.getElementById("login-screen").classList.remove("hidden");
+    document.getElementById("mail-screen").classList.add("hidden");
+  }
+};
+
 
 function showTab(tab) {
   document.getElementById("inbox-tab").classList.add("hidden");
@@ -18,21 +32,43 @@ async function login() {
   });
 
   if (res.ok) {
-    currentUser = email;
-    document.getElementById("user-email").textContent = email;
-    document.getElementById("login-screen").classList.add("hidden");
-    document.getElementById("mail-screen").classList.remove("hidden");
-    loadInbox();
-  } else {
+  currentUser = email;
+  localStorage.setItem("userEmail", email); // Save user session
+  document.getElementById("user-email").textContent = email;
+  document.getElementById("login-screen").classList.add("hidden");
+  document.getElementById("mail-screen").classList.remove("hidden");
+  loadInbox();
+}
+else {
     document.getElementById("login-msg").textContent = "Invalid credentials.";
   }
 }
 
-function logout() {
+/* function logout() {
+  // Clear the stored user session
+  localStorage.removeItem("userEmail");
   currentUser = null;
-  document.getElementById("login-screen").classList.remove("hidden");
+
+  // Clear any input fields from previous login
+  document.getElementById("email").value = "";
+  document.getElementById("password").value = "";
+
+  // Hide mail interface and show login screen
   document.getElementById("mail-screen").classList.add("hidden");
+  document.getElementById("login-screen").classList.remove("hidden");
+
+  // Optional: Clear inbox and compose messages
+  document.getElementById("inbox").innerHTML = "";
+  document.getElementById("send-msg").textContent = "";
+  document.getElementById("login-msg").textContent = "";
 }
+*/
+
+function logout() {
+  localStorage.removeItem("userEmail");
+  location.reload();
+}
+
 
 async function loadInbox() {
   const res = await fetch(`/inbox/${currentUser}`);
