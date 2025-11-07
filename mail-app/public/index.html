@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini Mail Interface</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="login-screen" style="text-align: center;">
+    <h2>Login</h2>
+    <input type="text" id="email" placeholder="Email" />
+    <input type="password" id="password" placeholder="Password" /> <br>
+    <button onclick="login()">Login</button>
+    <p id="login-msg"></p>
+  </div>
+
+  <div id="mail-screen" class="hidden">
+    <h2>Welcome, <span id="user-email"></span></h2>
+    <div class="tabs">
+      <button onclick="showTab('inbox')">Inbox</button>
+      <button onclick="showTab('compose')">Compose</button>
+      <button onclick="logout()">Logout</button>
+    </div>
+
+    <div id="inbox-tab" class="tab-content">
+      <h3>Inbox</h3>
+      <div id="inbox"></div>
+    </div>
+
+    <div id="compose-tab" class="tab-content hidden">
+      <h3>Compose Email</h3>
+      <input type="text" id="to" placeholder="To" />
+      <input type="text" id="subject" placeholder="Subject" />
+      <textarea id="body" placeholder="Write your message..."></textarea> <br>
+      <button onclick="sendMail()">Send</button>
+      <p id="send-msg"></p>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

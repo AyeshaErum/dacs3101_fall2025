@@ -1,0 +1,46 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  padding: 20px;
+  color: #333;
+}
+
+#login-screen, #mail-screen {
+  background: white;
+  padding: 20px;
+  max-width: 500px;
+  margin: auto;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  
+}
+
+input, textarea {
+  width: 80%;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+button {
+  background: #007bff;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button:hover {
+  background: #0056b3;
+}
+
+.hidden { display: none; }
+
+.tabs { margin-bottom: 10px; }
+
+#inbox div {
+  background: #e9ecef;
+  padding: 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+}
