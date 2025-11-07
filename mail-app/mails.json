@@ -6,5 +6,21 @@
     "body": "ff",
     "date": "2025-11-07T10:38:59.626Z",
     "attachment": null
+  },
+  {
+    "from": "ay@gmail.com",
+    "to": "user@example.com",
+    "subject": "Heyy there ",
+    "body": "Sending u a reply ",
+    "date": "2025-11-07T10:40:52.797Z",
+    "attachment": null
+  },
+  {
+    "from": "user@example.com",
+    "to": "ay@gmail.com",
+    "subject": "Another Hi ",
+    "body": "yayahahahahaha",
+    "date": "2025-11-07T10:43:23.904Z",
+    "attachment": "1762512203890-spring2025.pdf"
   }
 ]
