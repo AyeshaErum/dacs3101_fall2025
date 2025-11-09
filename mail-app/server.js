@@ -8,7 +8,6 @@ const crypto = require('crypto');
 
 
 
-
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -94,7 +93,7 @@ app.post("/login", (req, res) => {
   const { email, password } = req.body;
   const user = users.find(u => u.email === email && u.password === password);
   if (!user) return res.status(401).json({ message: "Invalid credentials" });
-  res.json({ message: "Login successful" });
+  res.json({ message: "Login successful!" });
 });
 
 // ✅ Inbox route (decrypt messages)
@@ -107,7 +106,7 @@ app.get("/inbox/:email", (req, res) => {
         try {
           return decrypt(m.body);
         } catch {
-          return "[Error decrypting message]";
+          return "[theres error in decrypting message]";
         }
       })()
     }));
@@ -119,11 +118,11 @@ app.post("/send", upload.single("attachment"), (req, res) => {
   const { from, to, subject, body } = req.body;
 
   if (!from || !to || !subject || !body)
-    return res.status(400).json({ message: "Missing required fields" });
+    return res.status(400).json({ message: "Missing required fields!" });
 
   const recipientExists = users.find(u => u.email === to);
   if (!recipientExists)
-    return res.status(400).json({ message: "Recipient does not exist" });
+    return res.status(400).json({ message: "Recipient does not exist!" });
 
   const newMail = {
     from,
