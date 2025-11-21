@@ -18,5 +18,15 @@
   {
     "email": "s1@gmail.com",
     "password": "123"
+  },
+  {
+    "email": "alice@gmail.com",
+    "passwordHash": "$2b$10$gzA6TE6ak.R40YjiBzr5LugFsj3i3iPtkBxxGLw/79mAJARHPrmd.",
+    "publicKeyPem": "{\"publicEncPem\":\"-----BEGIN PUBLIC KEY-----\\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtm0MxFmlEPiDpsACf7X1\\nsddOJ16MtN5G47P8N8YA2A3QHK7zL9YzJ69maMP3S8gOD0zitEY6qBkQ2YR6Nnap\\nOJVRl1fgnaDRQE/sC4KQlnhanoMK6edOiSJz3axzRM5ksOvXNykDwcVKJ72SNBFc\\nYfKOkVsJvE4+tRZf/tOn8uzvpAMwCebSinGSxEozZU5PNVb9q5dhwyj9GNOJyxLP\\nU/llkuiAYK2oPctzwyeJpQd93iF1YZ5v1+YcSJQubW/1pgcaJaA8VqgMl0Kss1CG\\nIpxXIKYfeIeCDbIVhhZpCUjoPQB+vOoPp/jnPXdObeRjOHykT1dAEq6cIlcAF8hL\\neQIDAQAB\\n-----END PUBLIC KEY-----\",\"publicSignPem\":\"-----BEGIN PUBLIC KEY-----\\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAztTtzDumPjDzRv6Uvlg8\\nOkwGFDfijrltG9y30kgxEQCavpRCYhp39SEjpNnqB9+z1hY/suaIgou0hGGh3aPk\\n45kgeOMCp5l691e2H/grlhNBV9PGypCjKC4rFNIQ1G3RS1rzrYymgSOsbJwGc5la\\n43IRzjAVmPS848B9nEj01IXkv2zJNt1po4ldUSg/dZ+CY4hjNm0MF/SSxSnD2YiJ\\nhPJwg/lWgnzL6eOCX0lk2lWVPDK0PHtlY9Lq6SADE1YBeKnswkMP29fuNuFOqbe0\\n3KWkew7+yk+ca6i5UA3xihov0lRvy6Re9vwUASFabpPWCO5VleEz0UBeIRTT05kW\\nCQIDAQAB\\n-----END PUBLIC KEY-----\"}"
+  },
+  {
+    "email": "bob@gmail.com",
+    "passwordHash": "$2b$10$ZYZT6nO1BTfkeF4ZIrBZve6MicciVv5L39lV4S21ulW2KXIVCeUW6",
+    "publicKeyPem": "{\"publicEncPem\":\"-----BEGIN PUBLIC KEY-----\\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArLJ/a3Y72GYDJP72xqC1\\n7YUzF/EEByRSSFpqYOPJv5lrRzSkEtw3nOFptwo3BVdRzhUGkjsSoHduhz0HYe+Q\\nlVZbouYJBXv0o6ryge16OvcQKVIoBRxTNhdtJMxCaEPcgf4YU3CDKhM1Ax34qeKm\\n6YDeEy3KY2zy83fbYfyfuQQQaDq+J6sd62QA4/JPs4fFM6BdQFDlQiPPEbF3n2rA\\nzzPnJpy5uxSEx+Dt/6I6o6TTT2FTdxIJx8Tjuuw5qZ0aIJxkW5xwfYCNeg4M//3w\\nuSx9Us4RH9s+01MXtSYMHmA5MWTtcUmalib0Tzn6wMbSJ0epAkHenmcBrxZui7O4\\nAwIDAQAB\\n-----END PUBLIC KEY-----\",\"publicSignPem\":\"-----BEGIN PUBLIC KEY-----\\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmbPGFXj503mIixM/QHKF\\n56dYdrY7w9pEL0QQT4tMukOr6QUfhks1ajXUF9lOSaQZNBlYZxuM4QEAwcX4ox/e\\nD1XD3ZpMCKSpuKIdaUB+zQ1mXQarPkvjLwUXW3OXbEPOD5DWOivxTWRW0pTUw7+/\\n3QrqMb92JH0njCA+awbAIW8RQTWETIoFASlsEFxlt5Tzrpv5nofyZ11AiphkYR16\\neOR++5LcKHiTmED/LigQKNnlvYspV2tv8yGJ3HaPUxZZylWCmvF+hBJeSnS8EHJu\\nSF9wXKZieWYqB+TpDnATMlb5WjlTUIqX7iV3HYznDqv50SzPC3s9GFlD7IO4iQo5\\n3QIDAQAB\\n-----END PUBLIC KEY-----\"}"
   }
 ]

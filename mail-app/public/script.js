@@ -1,132 +1,356 @@
-let currentUser = localStorage.getItem("userEmail") || null;
-localStorage.removeItem("userEmail");
+// script.js for mail-app (paste entire file)
+const API_BASE = ''; // same origin (served by server)
+let TOKEN = null;
+let LOGGED_IN_EMAIL = null;
+let PRIVATE_KEY_JWK = null; // stored in localStorage as 'mail_private_jwk'
 
-window.onload = () => {
-  if (currentUser) {
-    document.getElementById("user-email").textContent = currentUser;
-    document.getElementById("login-screen").classList.add("hidden");
-    document.getElementById("mail-screen").classList.remove("hidden");
-    loadInbox();
+// UTILS: b64 & hex
+function bufToB64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function b64ToBuf(b64) {
+  const str = atob(b64);
+  const arr = new Uint8Array(str.length);
+  for (let i=0;i<str.length;i++) arr[i]=str.charCodeAt(i);
+  return arr.buffer;
+}
+function strToBuf(s) { return new TextEncoder().encode(s); }
+function bufToStr(buf) { return new TextDecoder().decode(buf); }
+
+// --- KEY HELPERS (Web Crypto) ---
+// Generate RSA key pair (for both encryption OAEP and signing PSS)
+async function generateRsaKeypair() {
+  // We'll generate 2048-bit RSA, allow usages for encrypt/decrypt & sign/verify
+  // Browsers may require separate key usages; we'll export separate keys if needed.
+  const keyPair = await window.crypto.subtle.generateKey(
+    {
+      name: "RSA-OAEP",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1,0,1]),
+      hash: "SHA-256"
+    },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  // For signing we also generate a separate RSA-PSS key pair (recommended)
+  const signPair = await window.crypto.subtle.generateKey(
+    {
+      name: "RSA-PSS",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1,0,1]),
+      hash: "SHA-256"
+    },
+    true,
+    ["sign", "verify"]
+  );
+  return { enc: keyPair, sign: signPair };
+}
+
+async function exportPublicKeyToPem(key) {
+  const spki = await window.crypto.subtle.exportKey("spki", key);
+  const b64 = bufToB64(spki);
+  const pem = `-----BEGIN PUBLIC KEY-----\n${b64.match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`;
+  return pem;
+}
+
+async function exportPrivateJwk(key) {
+  return await window.crypto.subtle.exportKey("jwk", key);
+}
+
+async function importPublicKeyFromPem(pem, usage, algName) {
+  // pem => ArrayBuffer (SPKI)
+  const b64 = pem.replace(/-----.*-----/g, '').replace(/\s+/g,'');
+  const buf = b64ToBuf(b64);
+  if (algName === 'RSA-OAEP') {
+    return await window.crypto.subtle.importKey('spki', buf, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, usage);
+  } else if (algName === 'RSA-PSS') {
+    return await window.crypto.subtle.importKey('spki', buf, { name: 'RSA-PSS', hash: 'SHA-256' }, true, usage);
   } else {
-    document.getElementById("login-screen").classList.remove("hidden");
-    document.getElementById("mail-screen").classList.add("hidden");
+    throw new Error('Unsupported algName');
+  }
+}
+
+async function importPrivateKeyFromJwk(jwk, usage, algName) {
+  if (algName === 'RSA-OAEP') {
+    return await window.crypto.subtle.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, usage);
+  } else if (algName === 'RSA-PSS') {
+    return await window.crypto.subtle.importKey('jwk', jwk, { name: 'RSA-PSS', hash: 'SHA-256' }, true, usage);
+  } else {
+    throw new Error('Unsupported algName');
+  }
+}
+
+// --- Registration flow ---
+// We will generate two keypairs: one for encryption (RSA-OAEP) and one for signing (RSA-PSS).
+async function registerUser(email, password) {
+  // UI lock
+  const { enc, sign } = await generateRsaKeypair();
+
+  // export public keys
+  const publicEncPem = await exportPublicKeyToPem(enc.publicKey);
+  const publicSignPem = await exportPublicKeyToPem(sign.publicKey);
+
+  // export private JWKs and save to localStorage
+  const privateEncJwk = await exportPrivateJwk(enc.privateKey);
+  const privateSignJwk = await exportPrivateJwk(sign.privateKey);
+
+  // combine both private jwks into a single object and store
+  const privBundle = { enc: privateEncJwk, sign: privateSignJwk, email };
+  localStorage.setItem('mail_private_jwk', JSON.stringify(privBundle));
+  PRIVATE_KEY_JWK = privBundle;
+
+  // send register to server with public keys combined
+  const publicBundle = {
+    publicEncPem,
+    publicSignPem
+  };
+  const res = await fetch('/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, publicKeyPem: JSON.stringify(publicBundle) })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Register failed');
+  return data;
+}
+
+// --- Login flow ---
+async function loginUser(email, password) {
+  const res = await fetch('/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Login failed');
+  TOKEN = data.token;
+  LOGGED_IN_EMAIL = email;
+  // load private jwk from localStorage
+  const priv = localStorage.getItem('mail_private_jwk');
+  if (priv) PRIVATE_KEY_JWK = JSON.parse(priv);
+  return data;
+}
+
+// --- Compose & Send (client-side hybrid crypto) ---
+// Steps:
+// 1) fetch recipient public keys (/pubkey/:email) => returns JSON-stringified bundle { publicEncPem, publicSignPem }
+// 2) generate AES-GCM key, encrypt message content -> ciphertext & iv
+// 3) export AES key raw, encrypt AES key with recipient's publicEncPem (RSA-OAEP) => encKey (base64)
+// 4) sign ciphertext with sender private sign key (RSA-PSS) => signature (base64)
+// 5) send bundle {ciphertext, iv, encKey, signature} to server via /send (with token)
+async function sendEncryptedMail(to, subject, bodyText) {
+  if (!TOKEN) throw new Error('Not logged in');
+
+  // fetch recipient public key bundle
+  const r = await fetch(`/pubkey/${encodeURIComponent(to)}`);
+  if (!r.ok) {
+    const err = await r.json();
+    throw new Error(err.message || 'Cannot fetch recipient public key');
+  }
+  const pb = await r.json();
+  // pb.publicKeyPem is JSON-stringified bundle
+  const publicBundle = JSON.parse(pb.publicKeyPem);
+  const recipientEncPem = publicBundle.publicEncPem;
+  const recipientSignPem = publicBundle.publicSignPem;
+
+  // import recipient public keys
+  const recipientEncKey = await importPublicKeyFromPem(recipientEncPem, ['encrypt'], 'RSA-OAEP');
+  // note: we will verify signature later using sender public key fetched from server when receiving
+
+  // generate AES-GCM key
+  const aesKey = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  const iv = window.crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV recommended for GCM
+
+  // encrypt message (text)
+  const ciphertextBuf = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, strToBuf(bodyText));
+
+  // export AES key raw and encrypt it with recipient's RSA-OAEP public key
+  const rawAes = await window.crypto.subtle.exportKey('raw', aesKey);
+  const encKeyBuf = await window.crypto.subtle.encrypt({ name: 'RSA-OAEP' }, recipientEncKey, rawAes);
+
+  // import sender signing private key from localStorage
+  if (!PRIVATE_KEY_JWK || !PRIVATE_KEY_JWK.sign) throw new Error('Missing local private signing key. Register first.');
+  const senderPrivSign = await importPrivateKeyFromJwk(PRIVATE_KEY_JWK.sign, ['sign'], 'RSA-PSS');
+
+  // create signature over ciphertext (we sign the ciphertext bytes)
+  const signatureBuf = await window.crypto.subtle.sign({ name: 'RSA-PSS', saltLength: 32 }, senderPrivSign, ciphertextBuf);
+
+  // base64-encode pieces
+  const bundle = {
+    ciphertext: bufToB64(ciphertextBuf),
+    iv: bufToB64(iv.buffer),
+    encKey: bufToB64(encKeyBuf),
+    signature: bufToB64(signatureBuf)
+  };
+
+  // send to server
+  const res = await fetch('/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + TOKEN,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ to, subject, bundle })
+  });
+  const j = await res.json();
+  if (!res.ok) throw new Error(j.message || 'Send failed');
+  return j;
+}
+
+// --- Fetch inbox and decrypt messages ---
+async function fetchAndDecryptInbox() {
+  if (!TOKEN) throw new Error('Not logged in');
+  const res = await fetch('/inbox', {
+    headers: { Authorization: 'Bearer ' + TOKEN }
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message || 'Inbox fetch failed');
+  }
+  const mails = await res.json(); // array of {id, from, subject, bundle, date}
+  const output = [];
+  for (const m of mails) {
+    try {
+      const { bundle } = m;
+      // load sender public signing key to verify signature
+      const from = m.from;
+      const resp = await fetch(`/pubkey/${encodeURIComponent(from)}`);
+      const pb = await resp.json();
+      const senderPubBundle = JSON.parse(pb.publicKeyPem);
+      const senderSignPem = senderPubBundle.publicSignPem;
+      const senderPubSignKey = await importPublicKeyFromPem(senderSignPem, ['verify'], 'RSA-PSS');
+
+      // import our private RSA-OAEP key to decrypt AES key
+      if (!PRIVATE_KEY_JWK || !PRIVATE_KEY_JWK.enc) throw new Error('Missing private decrypt key locally');
+      const myPrivEnc = await importPrivateKeyFromJwk(PRIVATE_KEY_JWK.enc, ['decrypt'], 'RSA-OAEP');
+
+      // decode pieces
+      const encKeyBuf = b64ToBuf(bundle.encKey);
+      const rawAes = await window.crypto.subtle.decrypt({ name: 'RSA-OAEP' }, myPrivEnc, encKeyBuf);
+
+      // import AES key and decrypt ciphertext
+      const aesKey = await window.crypto.subtle.importKey('raw', rawAes, { name: 'AES-GCM' }, false, ['decrypt']);
+      const iv = b64ToBuf(bundle.iv);
+      const ciphertextBuf = b64ToBuf(bundle.ciphertext);
+      const plainBuf = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, aesKey, ciphertextBuf);
+      const plainText = bufToStr(plainBuf);
+
+      // verify signature
+      const signatureBuf = b64ToBuf(bundle.signature);
+      const verified = await window.crypto.subtle.verify({ name: 'RSA-PSS', saltLength: 32 }, senderPubSignKey, signatureBuf, ciphertextBuf);
+
+      output.push({
+        id: m.id,
+        from: m.from,
+        subject: m.subject,
+        body: plainText,
+        signature_valid: verified,
+        date: m.date
+      });
+    } catch (err) {
+      output.push({
+        id: m.id,
+        from: m.from,
+        subject: m.subject,
+        body: '[decryption or verification failed: ' + (err.message || err) + ']',
+        signature_valid: false,
+        date: m.date
+      });
+    }
+  }
+  return output;
+}
+
+// --- UI helpers (very small) ---
+function showLogin() {
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('mail-screen').classList.add('hidden');
+}
+function showMail(email) {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('mail-screen').classList.remove('hidden');
+  document.getElementById('user-email').textContent = email;
+}
+function showTab(tab) {
+  document.getElementById('inbox-tab').classList.toggle('hidden', tab !== 'inbox');
+  document.getElementById('compose-tab').classList.toggle('hidden', tab !== 'compose');
+}
+
+// --- Hook up DOM events ---
+window.register = async function () {
+  try {
+    const email = document.getElementById('newEmail').value.trim();
+    const password = document.getElementById('newPassword').value;
+    if (!email || !password) return alert('fill email + password');
+    document.getElementById('register-msg').textContent = 'Generating keys... (may take a second)';
+    await registerUser(email, password);
+    document.getElementById('register-msg').textContent = 'Registered! Please login.';
+    setTimeout(() => window.location.href = 'index.html', 800);
+  } catch (e) {
+    alert('Register error: ' + (e.message || e));
+    document.getElementById('register-msg').textContent = '';
   }
 };
 
+window.login = async function () {
+  try {
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    if (!email || !password) return alert('fill email + password');
+    await loginUser(email, password);
+    showMail(email);
+    await refreshInbox();
+  } catch (e) {
+    alert('Login error: ' + (e.message || e));
+  }
+};
 
-function showTab(tab) {
-  document.getElementById("inbox-tab").classList.add("hidden");
-  document.getElementById("compose-tab").classList.add("hidden");
-  document.getElementById(`${tab}-tab`).classList.remove("hidden");
-  if (tab === "inbox") loadInbox();
-}
+window.logout = function () {
+  TOKEN = null;
+  LOGGED_IN_EMAIL = null;
+  localStorage.removeItem('mail_private_jwk');
+  PRIVATE_KEY_JWK = null;
+  showLogin();
+};
 
-async function login() {
-  const email = document.getElementById("email").value;
-  const password = document.getElementById("password").value;
+window.sendMail = async function () {
+  try {
+    const to = document.getElementById('to').value.trim();
+    const subject = document.getElementById('subject').value;
+    const body = document.getElementById('body').value;
+    if (!to || !subject || !body) return alert('to, subject, body required');
+    document.getElementById('send-msg').textContent = 'Sending...';
+    await sendEncryptedMail(to, subject, body);
+    document.getElementById('send-msg').textContent = 'Sent!';
+    document.getElementById('body').value = '';
+    await refreshInbox();
+  } catch (e) {
+    alert('Send error: ' + (e.message || e));
+    document.getElementById('send-msg').textContent = '';
+  }
+};
 
-  const res = await fetch("/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (res.ok) {
-  currentUser = email;
-  localStorage.setItem("userEmail", email); // Save user session
-  document.getElementById("user-email").textContent = email;
-  document.getElementById("login-screen").classList.add("hidden");
-  document.getElementById("mail-screen").classList.remove("hidden");
-  loadInbox();
-}
-else {
-    document.getElementById("login-msg").textContent = "Invalid credentials.";
+async function refreshInbox() {
+  try {
+    const list = await fetchAndDecryptInbox();
+    const container = document.getElementById('inbox');
+    container.innerHTML = '';
+    if (!list.length) container.textContent = '(no messages)';
+    for (const m of list) {
+      const el = document.createElement('div');
+      el.className = 'mail-item';
+      el.innerHTML = `<b>From:</b> ${m.from} <b>Subject:</b> ${m.subject} <br>
+                      <pre>${m.body}</pre>
+                      <small>Signature valid: ${m.signature_valid}</small>`;
+      container.appendChild(el);
+    }
+  } catch (e) {
+    console.error(e);
+    document.getElementById('inbox').textContent = 'Error loading inbox: ' + (e.message || e);
   }
 }
 
-/* function logout() {
-  // Clear the stored user session
-  localStorage.removeItem("userEmail");
-  currentUser = null;
-
-  // Clear any input fields from previous login
-  document.getElementById("email").value = "";
-  document.getElementById("password").value = "";
-
-  // Hide mail interface and show login screen
-  document.getElementById("mail-screen").classList.add("hidden");
-  document.getElementById("login-screen").classList.remove("hidden");
-
-  // Optional: Clear inbox and compose messages
-  document.getElementById("inbox").innerHTML = "";
-  document.getElementById("send-msg").textContent = "";
-  document.getElementById("login-msg").textContent = "";
-}
-*/
-
-function logout() {
-  localStorage.removeItem("userEmail");
-  location.reload();
-}
-
-
-async function loadInbox() {
-  const res = await fetch(`/inbox/${currentUser}`);
-  const mails = await res.json();
-  const inboxDiv = document.getElementById("inbox");
-  inboxDiv.innerHTML = "";
-
-  if (mails.length === 0) {
-    inboxDiv.innerHTML = "<p>No emails yet.</p>";
-    return;
-  }
-
- mails.forEach(mail => {
-  const div = document.createElement("div");
-  div.classList.add("mail-item");
-  div.innerHTML = `
-    <b>From:</b> ${mail.from} <br>
-    <b>Subject:</b> ${mail.subject} <br>
-    <small>${new Date(mail.date).toLocaleString()}</small>
-    <p>${mail.body}</p>
-    ${mail.attachment ? `<a href="/uploads/${mail.attachment}" target="_blank">Download Attachment</a>` : ''}
-    <hr>
-  `;
-  inboxDiv.appendChild(div);
+// On load: show login screen
+document.addEventListener('DOMContentLoaded', () => {
+  showLogin();
 });
-
-
-
-}
-
-async function sendMail() {
-  const to = document.getElementById("to").value;
-  const subject = document.getElementById("subject").value;
-  const body = document.getElementById("body").value;
-  const fileInput = document.getElementById("attachment");
-  const formData = new FormData();
-
-  formData.append("from", currentUser);
-  formData.append("to", to);
-  formData.append("subject", subject);
-  formData.append("body", body);
-
-  if (fileInput.files.length > 0) {
-    formData.append("attachment", fileInput.files[0]);
-  }
-
-  const res = await fetch("/send", {
-    method: "POST",
-    body: formData
-  });
-
-  if (res.ok) {
-    document.getElementById("send-msg").textContent = "Email sent successfully!";
-    document.getElementById("to").value = "";
-    document.getElementById("subject").value = "";
-    document.getElementById("body").value = "";
-    fileInput.value = ""; // clear file input
-  } else {
-    document.getElementById("send-msg").textContent = "Failed to send.";
-  }
-}
