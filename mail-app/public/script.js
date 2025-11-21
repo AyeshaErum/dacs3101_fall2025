@@ -99,41 +99,101 @@ async function importPrivateKeyFromJwk(jwk, usage, algName) {
   }
 }
 
-// --- Registration flow ---
-// We will generate two keypairs: one for encryption (RSA-OAEP) and one for signing (RSA-PSS).
+
+
+// --- Password-based encryption helpers (PBKDF2 -> AES-GCM) ---
+
+// Derive an AES-GCM key from a password and salt (Uint8Array)
+async function deriveKeyFromPassword(password, saltUint8) {
+  const pwUtf8 = new TextEncoder().encode(password);
+  const pwKey = await window.crypto.subtle.importKey('raw', pwUtf8, { name: 'PBKDF2' }, false, ['deriveKey']);
+  const key = await window.crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: saltUint8,
+      iterations: 100000,
+      hash: 'SHA-256'
+    },
+    pwKey,
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+  return key;
+}
+
+// Encrypt JSON-string privateBundle with password; returns { ciphertextB64, saltB64, ivB64 }
+async function encryptPrivateBundle(privateBundleObj, password) {
+  const plain = new TextEncoder().encode(JSON.stringify(privateBundleObj));
+  const salt = window.crypto.getRandomValues(new Uint8Array(16)); // 128-bit salt
+  const iv = window.crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV for GCM
+  const key = await deriveKeyFromPassword(password, salt);
+  const cipherBuf = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
+  return {
+    ciphertext: bufToB64(cipherBuf),
+    salt: bufToB64(salt.buffer),
+    iv: bufToB64(iv.buffer)
+  };
+}
+
+// Decrypt server-provided encrypted bundle {ciphertext, salt, iv} (base64) with password
+// Returns parsed JSON object (the private JWK bundle)
+async function decryptPrivateBundle(encryptedObj, password) {
+  const saltBuf = b64ToBuf(encryptedObj.salt);
+  const ivBuf = b64ToBuf(encryptedObj.iv);
+  const cipherBuf = b64ToBuf(encryptedObj.ciphertext);
+  const salt = new Uint8Array(saltBuf);
+  const iv = new Uint8Array(ivBuf);
+  const key = await deriveKeyFromPassword(password, salt);
+  const plainBuf = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipherBuf);
+  const plainText = new TextDecoder().decode(plainBuf);
+  return JSON.parse(plainText);
+}
+
+
+
+
+// --- Registration flow (updated): encrypt private bundle with password and send encrypted blob to server ---
 async function registerUser(email, password) {
-  // UI lock
+  // generate keypairs
   const { enc, sign } = await generateRsaKeypair();
 
-  // export public keys
+  // export public keys (PEM)
   const publicEncPem = await exportPublicKeyToPem(enc.publicKey);
   const publicSignPem = await exportPublicKeyToPem(sign.publicKey);
 
-  // export private JWKs and save to localStorage
+  // export private JWKs (keep local copy for convenience)
   const privateEncJwk = await exportPrivateJwk(enc.privateKey);
   const privateSignJwk = await exportPrivateJwk(sign.privateKey);
-
-  // combine both private jwks into a single object and store
   const privBundle = { enc: privateEncJwk, sign: privateSignJwk, email };
+
+  // store local copy (optional convenience backup)
   localStorage.setItem('mail_private_jwk', JSON.stringify(privBundle));
   PRIVATE_KEY_JWK = privBundle;
 
-  // send register to server with public keys combined
-  const publicBundle = {
-    publicEncPem,
-    publicSignPem
-  };
+  // encrypt the private bundle with a key derived from the user's password
+  const encrypted = await encryptPrivateBundle(privBundle, password);
+  // send register to server with public keys and encrypted private blob
+  const publicBundle = { publicEncPem, publicSignPem };
   const res = await fetch('/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, publicKeyPem: JSON.stringify(publicBundle) })
+    body: JSON.stringify({
+      email,
+      password,
+      publicKeyPem: JSON.stringify(publicBundle),
+      encryptedPrivate: encrypted // { ciphertext, salt, iv } all base64
+    })
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || 'Register failed');
   return data;
 }
 
-// --- Login flow ---
+
+
+
+// --- Login flow (updated): after auth, fetch encrypted private blob and decrypt with password ---
 async function loginUser(email, password) {
   const res = await fetch('/login', {
     method: 'POST',
@@ -142,13 +202,32 @@ async function loginUser(email, password) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || 'Login failed');
+
   TOKEN = data.token;
   LOGGED_IN_EMAIL = email;
-  // load private jwk from localStorage
-  const priv = localStorage.getItem('mail_private_jwk');
-  if (priv) PRIVATE_KEY_JWK = JSON.parse(priv);
+
+  // If server returned encryptedPrivate blob, try to decrypt it with provided password
+  if (data.encryptedPrivate) {
+    try {
+      const decrypted = await decryptPrivateBundle(data.encryptedPrivate, password);
+      // Store decrypted JWK bundle locally for this browser (so you can decrypt without re-entering password)
+      localStorage.setItem('mail_private_jwk', JSON.stringify(decrypted));
+      PRIVATE_KEY_JWK = decrypted;
+    } catch (e) {
+      // Decryption failed (wrong password or corrupt blob)
+      console.warn('Failed to decrypt private bundle from server:', e);
+      // Do NOT throw here because user can still have local keys or re-import
+    }
+  } else {
+    // fallback: load private jwk from localStorage (existing UX)
+    const priv = localStorage.getItem('mail_private_jwk');
+    if (priv) PRIVATE_KEY_JWK = JSON.parse(priv);
+  }
   return data;
 }
+
+
+
 
 // --- Compose & Send (client-side hybrid crypto) ---
 // Steps:

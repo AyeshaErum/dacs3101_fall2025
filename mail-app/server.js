@@ -70,8 +70,15 @@ function authenticate(req, res, next) {
  * - password is hashed (bcrypt)
  * - publicKeyPem is stored (string)
  */
+/**
+ * Register
+ * Expects JSON: { email, password, publicKeyPem, encryptedPrivate }
+ * - password is hashed (bcrypt)
+ * - publicKeyPem is stored (string)
+ * - encryptedPrivate is optional object { ciphertext, salt, iv } (base64 strings) — stored as-is
+ */
 app.post('/register', (req, res) => {
-  const { email, password, publicKeyPem } = req.body;
+  const { email, password, publicKeyPem, encryptedPrivate } = req.body;
   if (!email || !password || !publicKeyPem) {
     return res.status(400).json({ message: 'email, password and publicKeyPem required' });
   }
@@ -81,15 +88,31 @@ app.post('/register', (req, res) => {
   }
   const salt = bcrypt.genSaltSync(10);
   const hash = bcrypt.hashSync(password, salt);
-  users.push({ email, passwordHash: hash, publicKeyPem });
+
+  // store encryptedPrivate if present (will be an object) - do not attempt to decrypt on server
+  const userRecord = {
+    email,
+    passwordHash: hash,
+    publicKeyPem,
+    encryptedPrivate: encryptedPrivate || null
+  };
+
+  users.push(userRecord);
   writeUsers(users);
   return res.json({ message: 'Registered' });
 });
+
 
 /**
  * Login
  * Expects JSON: { email, password }
  * Returns: { token }
+ */
+/**
+ * Login
+ * Expects JSON: { email, password }
+ * Returns: { token, encryptedPrivate? }
+ * - encryptedPrivate is returned so client can decrypt it with password-derived key
  */
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
@@ -100,8 +123,13 @@ app.post('/login', (req, res) => {
   const ok = bcrypt.compareSync(password, user.passwordHash);
   if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
   const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: '12h' });
-  return res.json({ token });
+
+  // Return encryptedPrivate blob (if one exists) so client can decrypt locally with the password
+  const response = { token };
+  if (user.encryptedPrivate) response.encryptedPrivate = user.encryptedPrivate;
+  return res.json(response);
 });
+
 
 /**
  * Fetch public key of a user
