@@ -4,18 +4,37 @@ let TOKEN = null;
 let LOGGED_IN_EMAIL = null;
 let PRIVATE_KEY_JWK = null; // stored in localStorage as 'mail_private_jwk'
 
-// UTILS: b64 & hex
-function bufToB64(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+// UTILS: robust base64 <-> ArrayBuffer and string helpers
+// Safe implementations that handle large buffers and keep types consistent.
+
+function bufToB64(buffer) {
+  // Accept ArrayBuffer or TypedArray
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  // convert to binary string in chunks to avoid call-stack issues
+  const chunkSize = 0x8000; // 32KB chunks
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
 }
+
 function b64ToBuf(b64) {
-  const str = atob(b64);
-  const arr = new Uint8Array(str.length);
-  for (let i=0;i<str.length;i++) arr[i]=str.charCodeAt(i);
-  return arr.buffer;
+  // decode base64 to ArrayBuffer
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer; // return ArrayBuffer
 }
+
 function strToBuf(s) { return new TextEncoder().encode(s); }
 function bufToStr(buf) { return new TextDecoder().decode(buf); }
+
+
 
 // --- KEY HELPERS (Web Crypto) ---
 // Generate RSA key pair (for both encryption OAEP and signing PSS)
@@ -276,6 +295,51 @@ function showTab(tab) {
   document.getElementById('compose-tab').classList.toggle('hidden', tab !== 'compose');
 }
 
+
+// --- Import private key UI handlers (for demo/local decryption) ---
+function showImportPrivate() {
+  const area = document.getElementById('import-keys-area');
+  if (area) area.classList.remove('hidden');
+}
+
+function hideImportPrivate() {
+  const area = document.getElementById('import-keys-area');
+  if (area) area.classList.add('hidden');
+  const ta = document.getElementById('importPrivTextarea');
+  if (ta) ta.value = '';
+  const msg = document.getElementById('importPrivMsg');
+  if (msg) msg.textContent = '';
+}
+
+async function importPrivateBundle() {
+  const ta = document.getElementById('importPrivTextarea');
+  const msg = document.getElementById('importPrivMsg');
+  msg.textContent = 'Importing...';
+  try {
+    const raw = ta.value.trim();
+    if (!raw) throw new Error('Paste the private JWK JSON you saved at registration.');
+    let obj;
+    try { obj = JSON.parse(raw); } catch (e) { throw new Error('Invalid JSON'); }
+    // minimal validation
+    if (!obj.enc || !obj.sign) throw new Error('JWK bundle must contain "enc" and "sign" objects.');
+    obj.email = obj.email || LOGGED_IN_EMAIL || (obj.enc && obj.enc.kid) || '';
+    // store
+    localStorage.setItem('mail_private_jwk', JSON.stringify(obj));
+    PRIVATE_KEY_JWK = obj;
+    msg.textContent = 'Imported. Refreshing inbox...';
+    hideImportPrivate();
+    // attempt to refresh inbox now that private keys are present
+    try { await refreshInbox(); } catch (e) { console.error('refresh after import failed', e); }
+  } catch (err) {
+    msg.textContent = 'Import failed: ' + (err.message || err);
+  }
+}
+
+function cancelImportPrivate() {
+  hideImportPrivate();
+}
+
+
 // --- Hook up DOM events ---
 window.register = async function () {
   try {
@@ -299,19 +363,37 @@ window.login = async function () {
     if (!email || !password) return alert('fill email + password');
     await loginUser(email, password);
     showMail(email);
+
+    // If private keys are missing locally, show import widget (so user can paste them).
+    if (!PRIVATE_KEY_JWK || !PRIVATE_KEY_JWK.enc) {
+      // show import UI so the user can paste the private JWK bundle
+      showImportPrivate();
+      // still attempt inbox fetch (will show decryption failed message until keys imported)
+      try { await refreshInbox(); } catch (e) { console.warn('Inbox fetch after login failed (keys missing)', e); }
+      return;
+    }
+
+    // normal flow
     await refreshInbox();
   } catch (e) {
     alert('Login error: ' + (e.message || e));
   }
 };
 
+
+
+// Persist private keys across logout so user can decrypt later in same browser.
+// We clear auth token and UI state but keep the private key bundle in localStorage.
+// If you want a full "forget keys" action, add a separate button that calls clearLocalPrivateKeys().
 window.logout = function () {
   TOKEN = null;
   LOGGED_IN_EMAIL = null;
-  localStorage.removeItem('mail_private_jwk');
-  PRIVATE_KEY_JWK = null;
+  // DO NOT remove mail_private_jwk from localStorage so keys persist for future logins.
+  // localStorage.removeItem('mail_private_jwk'); // intentionally commented out
+  PRIVATE_KEY_JWK = PRIVATE_KEY_JWK || (localStorage.getItem('mail_private_jwk') ? JSON.parse(localStorage.getItem('mail_private_jwk')) : null);
   showLogin();
 };
+
 
 window.sendMail = async function () {
   try {
@@ -339,9 +421,7 @@ async function refreshInbox() {
     for (const m of list) {
       const el = document.createElement('div');
       el.className = 'mail-item';
-      el.innerHTML = `<b>From:</b> ${m.from} <b>Subject:</b> ${m.subject} <br>
-                      <pre>${m.body}</pre>
-                      <small>Signature valid: ${m.signature_valid}</small>`;
+      el.innerHTML = `<b>From:</b> ${m.from} <br><b>Subject:</b> ${m.subject} <br> <pre>${m.body}</pre><small >Signature valid: ${m.signature_valid}</small>`;
       container.appendChild(el);
     }
   } catch (e) {
