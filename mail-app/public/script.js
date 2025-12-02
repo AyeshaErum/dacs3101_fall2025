@@ -169,6 +169,7 @@ async function registerUser(email, password) {
 
   // store local copy (optional convenience backup)
   localStorage.setItem('mail_private_jwk', JSON.stringify(privBundle));
+  console.log("here register")
   PRIVATE_KEY_JWK = privBundle;
 
   // encrypt the private bundle with a key derived from the user's password

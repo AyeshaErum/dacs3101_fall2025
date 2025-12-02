@@ -98,6 +98,8 @@ app.post('/register', (req, res) => {
   };
 
   users.push(userRecord);
+  console.log(`[REGISTER] New user created: ${email}`);
+
   writeUsers(users);
   return res.json({ message: 'Registered' });
 });
@@ -127,6 +129,8 @@ app.post('/login', (req, res) => {
   // Return encryptedPrivate blob (if one exists) so client can decrypt locally with the password
   const response = { token };
   if (user.encryptedPrivate) response.encryptedPrivate = user.encryptedPrivate;
+  console.log(`[LOGIN] User logged in: ${email}`);
+
   return res.json(response);
 });
 
