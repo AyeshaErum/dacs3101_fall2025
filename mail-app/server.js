@@ -1,4 +1,3 @@
-// server.js (paste entire file into mail-app/server.js)
 const fs = require('fs');
 const path = require('path');
 const express = require('express');

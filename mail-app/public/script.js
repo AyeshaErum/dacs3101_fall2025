@@ -1,4 +1,3 @@
-// script.js for mail-app (paste entire file)
 const API_BASE = ''; // same origin (served by server)
 let TOKEN = null;
 let LOGGED_IN_EMAIL = null;
@@ -39,29 +38,35 @@ function bufToStr(buf) { return new TextDecoder().decode(buf); }
 // --- KEY HELPERS (Web Crypto) ---
 // Generate RSA key pair (for both encryption OAEP and signing PSS)
 async function generateRsaKeypair() {
+  console.log("[RSA] Starting RSA keypair generation...");
+
   // We'll generate 2048-bit RSA, allow usages for encrypt/decrypt & sign/verify
   // Browsers may require separate key usages; we'll export separate keys if needed.
   const keyPair = await window.crypto.subtle.generateKey(
     {
       name: "RSA-OAEP",
       modulusLength: 2048,
-      publicExponent: new Uint8Array([1,0,1]),
+      publicExponent: new Uint8Array([1, 0, 1]),
       hash: "SHA-256"
     },
     true,
     ["encrypt", "decrypt"]
   );
+
   // For signing we also generate a separate RSA-PSS key pair (recommended)
   const signPair = await window.crypto.subtle.generateKey(
     {
       name: "RSA-PSS",
       modulusLength: 2048,
-      publicExponent: new Uint8Array([1,0,1]),
+      publicExponent: new Uint8Array([1, 0, 1]),
       hash: "SHA-256"
     },
     true,
     ["sign", "verify"]
   );
+
+  console.log("[RSA] RSA keypair generated.");
+
   return { enc: keyPair, sign: signPair };
 }
 
@@ -69,20 +74,28 @@ async function exportPublicKeyToPem(key) {
   const spki = await window.crypto.subtle.exportKey("spki", key);
   const b64 = bufToB64(spki);
   const pem = `-----BEGIN PUBLIC KEY-----\n${b64.match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`;
+  console.log("[RSA] Exporting public key...");
+
   return pem;
 }
 
 async function exportPrivateJwk(key) {
+  console.log("[RSA] Exporting private key...");
+
   return await window.crypto.subtle.exportKey("jwk", key);
 }
 
 async function importPublicKeyFromPem(pem, usage, algName) {
   // pem => ArrayBuffer (SPKI)
-  const b64 = pem.replace(/-----.*-----/g, '').replace(/\s+/g,'');
+  const b64 = pem.replace(/-----.*-----/g, '').replace(/\s+/g, '');
   const buf = b64ToBuf(b64);
   if (algName === 'RSA-OAEP') {
+    console.log("[RSA] Importing public key...");
+
     return await window.crypto.subtle.importKey('spki', buf, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, usage);
   } else if (algName === 'RSA-PSS') {
+    console.log("[RSA] Importing public key...");
+
     return await window.crypto.subtle.importKey('spki', buf, { name: 'RSA-PSS', hash: 'SHA-256' }, true, usage);
   } else {
     throw new Error('Unsupported algName');
@@ -91,8 +104,11 @@ async function importPublicKeyFromPem(pem, usage, algName) {
 
 async function importPrivateKeyFromJwk(jwk, usage, algName) {
   if (algName === 'RSA-OAEP') {
+    console.log("[RSA] Importing private key...");
     return await window.crypto.subtle.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, usage);
   } else if (algName === 'RSA-PSS') {
+    console.log("[RSA] Importing private key...");
+
     return await window.crypto.subtle.importKey('jwk', jwk, { name: 'RSA-PSS', hash: 'SHA-256' }, true, usage);
   } else {
     throw new Error('Unsupported algName');
@@ -128,6 +144,9 @@ async function encryptPrivateBundle(privateBundleObj, password) {
   const salt = window.crypto.getRandomValues(new Uint8Array(16)); // 128-bit salt
   const iv = window.crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV for GCM
   const key = await deriveKeyFromPassword(password, salt);
+
+  console.log("[AES] Generated salt and IV for encryption.");
+
   const cipherBuf = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
   return {
     ciphertext: bufToB64(cipherBuf),
@@ -147,6 +166,7 @@ async function decryptPrivateBundle(encryptedObj, password) {
   const key = await deriveKeyFromPassword(password, salt);
   const plainBuf = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipherBuf);
   const plainText = new TextDecoder().decode(plainBuf);
+
   return JSON.parse(plainText);
 }
 
@@ -167,6 +187,8 @@ async function registerUser(email, password) {
   const privateSignJwk = await exportPrivateJwk(sign.privateKey);
   const privBundle = { enc: privateEncJwk, sign: privateSignJwk, email };
 
+  console.log("[REGISTER] RSA keys generated successfully.");
+
   // store local copy (optional convenience backup)
   localStorage.setItem('mail_private_jwk', JSON.stringify(privBundle));
   console.log("here register")
@@ -174,6 +196,10 @@ async function registerUser(email, password) {
 
   // encrypt the private bundle with a key derived from the user's password
   const encrypted = await encryptPrivateBundle(privBundle, password);
+
+
+  console.log("[REGISTER] Sending registration request to server...");
+
   // send register to server with public keys and encrypted private blob
   const publicBundle = { publicEncPem, publicSignPem };
   const res = await fetch('/register', {
@@ -188,6 +214,8 @@ async function registerUser(email, password) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || 'Register failed');
+  console.log("[REGISTER] Registration completed.");
+
   return data;
 }
 
@@ -203,9 +231,12 @@ async function loginUser(email, password) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.message || 'Login failed');
+  console.log("[LOGIN] Login successful.");
 
   TOKEN = data.token;
   LOGGED_IN_EMAIL = email;
+
+
 
   // If server returned encryptedPrivate blob, try to decrypt it with provided password
   if (data.encryptedPrivate) {
@@ -255,17 +286,23 @@ async function sendEncryptedMail(to, subject, bodyText) {
   // import recipient public keys
   const recipientEncKey = await importPublicKeyFromPem(recipientEncPem, ['encrypt'], 'RSA-OAEP');
   // note: we will verify signature later using sender public key fetched from server when receiving
+  console.log("[SEND] Recipient public keys fetched.");
 
   // generate AES-GCM key
+  console.log("[SEND] Generating AES key for mail encryption...");
+
   const aesKey = await window.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
   const iv = window.crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV recommended for GCM
 
   // encrypt message (text)
   const ciphertextBuf = await window.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, strToBuf(bodyText));
+  console.log("[SEND] Message encrypted using AES-GCM.");
+
 
   // export AES key raw and encrypt it with recipient's RSA-OAEP public key
   const rawAes = await window.crypto.subtle.exportKey('raw', aesKey);
   const encKeyBuf = await window.crypto.subtle.encrypt({ name: 'RSA-OAEP' }, recipientEncKey, rawAes);
+  console.log("[SEND] AES key encrypted with recipient RSA public key.");
 
   // import sender signing private key from localStorage
   if (!PRIVATE_KEY_JWK || !PRIVATE_KEY_JWK.sign) throw new Error('Missing local private signing key. Register first.');
@@ -273,6 +310,7 @@ async function sendEncryptedMail(to, subject, bodyText) {
 
   // create signature over ciphertext (we sign the ciphertext bytes)
   const signatureBuf = await window.crypto.subtle.sign({ name: 'RSA-PSS', saltLength: 32 }, senderPrivSign, ciphertextBuf);
+  console.log("[SEND] Message ciphertext signed using RSA.");
 
   // base64-encode pieces
   const bundle = {
@@ -281,6 +319,7 @@ async function sendEncryptedMail(to, subject, bodyText) {
     encKey: bufToB64(encKeyBuf),
     signature: bufToB64(signatureBuf)
   };
+  console.log("[SEND] Sending encrypted mail to server...");
 
   // send to server
   const res = await fetch('/send', {
@@ -293,6 +332,8 @@ async function sendEncryptedMail(to, subject, bodyText) {
   });
   const j = await res.json();
   if (!res.ok) throw new Error(j.message || 'Send failed');
+  console.log("[SEND] Mail sent successfully.");
+
   return j;
 }
 
@@ -322,10 +363,12 @@ async function fetchAndDecryptInbox() {
       // import our private RSA-OAEP key to decrypt AES key
       if (!PRIVATE_KEY_JWK || !PRIVATE_KEY_JWK.enc) throw new Error('Missing private decrypt key locally');
       const myPrivEnc = await importPrivateKeyFromJwk(PRIVATE_KEY_JWK.enc, ['decrypt'], 'RSA-OAEP');
+      console.log(`[INBOX] Decrypting mail from ${m.from} `);
 
       // decode pieces
       const encKeyBuf = b64ToBuf(bundle.encKey);
       const rawAes = await window.crypto.subtle.decrypt({ name: 'RSA-OAEP' }, myPrivEnc, encKeyBuf);
+      console.log("[INBOX] Decrypting AES key using RSA private key...");
 
       // import AES key and decrypt ciphertext
       const aesKey = await window.crypto.subtle.importKey('raw', rawAes, { name: 'AES-GCM' }, false, ['decrypt']);
@@ -333,10 +376,15 @@ async function fetchAndDecryptInbox() {
       const ciphertextBuf = b64ToBuf(bundle.ciphertext);
       const plainBuf = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, aesKey, ciphertextBuf);
       const plainText = bufToStr(plainBuf);
+      console.log("[INBOX] AES-GCM message decrypted.");
+
+      console.log("[INBOX] Verifying RSA signature...");
 
       // verify signature
       const signatureBuf = b64ToBuf(bundle.signature);
       const verified = await window.crypto.subtle.verify({ name: 'RSA-PSS', saltLength: 32 }, senderPubSignKey, signatureBuf, ciphertextBuf);
+      console.log("[INBOX] Signature valid:", verified);
+
 
       output.push({
         id: m.id,
@@ -355,6 +403,8 @@ async function fetchAndDecryptInbox() {
         signature_valid: false,
         date: m.date
       });
+      console.error("[INBOX] Decryption/verification failed:", err);
+
     }
   }
   return output;
@@ -395,6 +445,7 @@ async function importPrivateBundle() {
   const ta = document.getElementById('importPrivTextarea');
   const msg = document.getElementById('importPrivMsg');
   msg.textContent = 'Importing...';
+
   try {
     const raw = ta.value.trim();
     if (!raw) throw new Error('Paste the private JWK JSON you saved at registration.');
@@ -462,15 +513,13 @@ window.login = async function () {
 
 
 
-// Persist private keys across logout so user can decrypt later in same browser.
-// We clear auth token and UI state but keep the private key bundle in localStorage.
-// If you want a full "forget keys" action, add a separate button that calls clearLocalPrivateKeys().
 window.logout = function () {
   TOKEN = null;
   LOGGED_IN_EMAIL = null;
-  // DO NOT remove mail_private_jwk from localStorage so keys persist for future logins.
-  // localStorage.removeItem('mail_private_jwk'); // intentionally commented out
+
   PRIVATE_KEY_JWK = PRIVATE_KEY_JWK || (localStorage.getItem('mail_private_jwk') ? JSON.parse(localStorage.getItem('mail_private_jwk')) : null);
+  console.log("[Logout] User logged out.")
+
   showLogin();
 };
 
